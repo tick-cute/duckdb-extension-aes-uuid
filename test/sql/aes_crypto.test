@@ -17,9 +17,9 @@ SELECT * FROM VALUES
     ('6ba7b8109dad11d180b400c04fd430c8', '01b9c1ae51b64f87934d9e0cf22a18c1', '12345678901234567890123456789012')
     AS t(namespace, id, key);
 
-# Test encode function
+# Test AES encrypt function with invalid key
 query I
-SELECT aes_crypto_encode(namespace, id, key) FROM test_vectors;
+SELECT aes_crypto_encrypt(namespace, id, key) FROM test_vectors;
 ----
 ERROR:INVALID_KEY_SIZE
 
@@ -27,69 +27,46 @@ ERROR:INVALID_KEY_SIZE
 statement ok
 UPDATE test_vectors SET key = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
-# Test encode function with proper key
+# Test AES encrypt function with proper key
 query I
-SELECT aes_crypto_encode(namespace, id, key) FROM test_vectors;
+SELECT aes_crypto_encrypt(namespace, id, key) FROM test_vectors;
 ----
 88384538-b320-c23e-a9ba-fd8be2831c37-22be92ce-0011-e353-7daf-4a118c21fd28
 
-# Test round-trip encode/decode
+# Test AES decrypt function
 query I
-WITH encoded AS (
-    SELECT aes_crypto_encode(namespace, id, key) AS uuid_val, key 
-    FROM test_vectors
-)
-SELECT aes_crypto_decode(uuid_val, key) FROM encoded;
+SELECT aes_crypto_decrypt('88384538-b320-c23e-a9ba-fd8be2831c37-22be92ce-0011-e353-7daf-4a118c21fd28', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
 ----
 6ba7b8109dad11d180b400c04fd430c801b9c1ae51b64f87934d9e0cf22a18c1
 
-# Test AES functions directly  
-query I
-SELECT aes_crypto_encrypt('6ba7b8109dad11d180b400c04fd430c8', '01b9c1ae51b64f87934d9e0cf22a18c1', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
-----
-88384538-b320-c23e-a9ba-fd8be2831c37-22be92ce-0011-e353-7daf-4a118c21fd28
-
 # Test oversize detection
 query I
-SELECT aes_crypto_encode('', repeat('a', 68), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
+SELECT aes_crypto_encrypt('', repeat('a', 68), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
 ----
 ERROR:OVERSIZE
 
-# Test encode_valid function produces valid UUID v4 (namespace+id)
+# Test encode_valid_uuid function produces valid UUID v4
 query I
-SELECT uuid_extract_version(aes_crypto_encode_valid('', hex('hello'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef')::uuid);
+SELECT uuid_extract_version(aes_crypto_encode_valid_uuid(hex('hello'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef')::uuid);
 ----
 4
 
-# Test encode_valid consistency (deterministic)
+# Test encode_valid_uuid consistency (deterministic)
 query I
-SELECT aes_crypto_encode_valid('', hex('test'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef') = aes_crypto_encode_valid('', hex('test'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
+SELECT aes_crypto_encode_valid_uuid(hex('test'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef') = aes_crypto_encode_valid_uuid(hex('test'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
 ----
 true
 
 # Test version consistency across different inputs  
 query III
 SELECT 
-    uuid_extract_version(aes_crypto_encode_valid('', hex('test1'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef')::uuid),
-    uuid_extract_version(aes_crypto_encode_valid('', hex('test2'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef')::uuid),
-    uuid_extract_version(aes_crypto_encode_valid('', hex('test3'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef')::uuid);
+    uuid_extract_version(aes_crypto_encode_valid_uuid(hex('test1'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef')::uuid),
+    uuid_extract_version(aes_crypto_encode_valid_uuid(hex('test2'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef')::uuid),
+    uuid_extract_version(aes_crypto_encode_valid_uuid(hex('test3'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef')::uuid);
 ----
 4	4	4
 
-# Test basic round-trip with namespace:hello
-query I
-WITH encoded AS (
-    SELECT aes_crypto_encode('', hex('namespace:hello'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef') AS uuid_val
-),
-decoded AS (
-    SELECT aes_crypto_decode(uuid_val, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef') AS decoded_hex
-    FROM encoded
-)
-SELECT unhex(substr(decoded_hex, 1, 20)) FROM decoded;
-----
-namespace:hello
-
-# Test encode_valid_uuid / decode_valid_uuid (single payload)
+# Test basic round-trip with namespace:hello (using valid UUID functions)
 query I
 WITH encoded AS (
     SELECT aes_crypto_encode_valid_uuid(hex('namespace:hello'), '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef') AS uuid_val
@@ -98,7 +75,7 @@ decoded AS (
     SELECT aes_crypto_decode_valid_uuid(uuid_val, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef') AS decoded_hex
     FROM encoded
 )
-SELECT unhex(substr(decoded_hex, 1, 20)) FROM decoded;
+SELECT unhex(substr(decoded_hex, 1, 30)) FROM decoded;
 ----
 namespace:hello
 

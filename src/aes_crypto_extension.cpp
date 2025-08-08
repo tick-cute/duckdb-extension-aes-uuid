@@ -98,36 +98,33 @@ inline void AesEncryptFunction(DataChunk &args, ExpressionState &state, Vector &
 
 			    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_ecb(), nullptr, key_bytes.data(), nullptr) != 1) {
 				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:ENCRYPT_INIT_FAILED");
+				    return StringVector::AddString(result, "ERROR:ENCRYPTION_INIT_FAILED");
 			    }
 
-			    // Disable padding since we handle it manually
-			    EVP_CIPHER_CTX_set_padding(ctx, 0);
-
+			    // Encrypt
 			    std::vector<uint8_t> encrypted(target_size);
-			    int len;
-
-			    if (EVP_EncryptUpdate(ctx, encrypted.data(), &len, combined_bytes.data(), target_size) != 1) {
+			    int out_len;
+			    if (EVP_EncryptUpdate(ctx, encrypted.data(), &out_len, combined_bytes.data(), combined_bytes.size()) != 1) {
 				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:ENCRYPT_UPDATE_FAILED");
+				    return StringVector::AddString(result, "ERROR:ENCRYPTION_FAILED");
 			    }
 
+			    // Finalize
 			    int final_len;
-			    if (EVP_EncryptFinal_ex(ctx, encrypted.data() + len, &final_len) != 1) {
+			    if (EVP_EncryptFinal_ex(ctx, encrypted.data() + out_len, &final_len) != 1) {
 				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:ENCRYPT_FINAL_FAILED");
+				    return StringVector::AddString(result, "ERROR:ENCRYPTION_FINALIZE_FAILED");
 			    }
 
 			    EVP_CIPHER_CTX_free(ctx);
 
 			    // Convert to hex and format as UUID
 			    std::string encrypted_hex = BytesToHex(encrypted);
-			    std::string uuid_formatted = FormatAsUUID(encrypted_hex);
+			    std::string uuid_result = FormatAsUUID(encrypted_hex);
 
-			    return StringVector::AddString(result, uuid_formatted);
-
+			    return StringVector::AddString(result, uuid_result);
 		    } catch (...) {
-			    return StringVector::AddString(result, "ERROR:ENCRYPTION_FAILED");
+			    return StringVector::AddString(result, "ERROR:ENCRYPTION_EXCEPTION");
 		    }
 	    });
 }
@@ -140,323 +137,86 @@ inline void AesDecryptFunction(DataChunk &args, ExpressionState &state, Vector &
 	BinaryExecutor::Execute<string_t, string_t, string_t>(
 	    uuid_vector, key_vector, result, args.size(), [&](string_t uuid_str, string_t key_hex) {
 		    try {
-			    std::string uuid = uuid_str.GetString();
-			    std::string key_str = key_hex.GetString();
-
-			    // Remove dashes from UUID to get hex
-			    std::string encrypted_hex;
-			    for (char c : uuid) {
-				    if (c != '-') {
-					    encrypted_hex += c;
-				    }
-			    }
-
-			    auto encrypted_bytes = HexToBytes(encrypted_hex);
-			    auto key_bytes = HexToBytes(key_str);
-
-			    if (key_bytes.size() != 32) {
-				    return StringVector::AddString(result, "ERROR:INVALID_KEY_SIZE");
-			    }
-
-			    // Set up AES decryption
-			    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
-			    if (!ctx) {
-				    return StringVector::AddString(result, "ERROR:CTX_CREATION_FAILED");
-			    }
-
-			    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_ecb(), nullptr, key_bytes.data(), nullptr) != 1) {
-				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:DECRYPT_INIT_FAILED");
-			    }
-
-			    EVP_CIPHER_CTX_set_padding(ctx, 0);
-
-			    std::vector<uint8_t> decrypted(encrypted_bytes.size());
-			    int len;
-
-			    if (EVP_DecryptUpdate(ctx, decrypted.data(), &len, encrypted_bytes.data(), encrypted_bytes.size()) !=
-			        1) {
-				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:DECRYPT_UPDATE_FAILED");
-			    }
-
-			    int final_len;
-			    if (EVP_DecryptFinal_ex(ctx, decrypted.data() + len, &final_len) != 1) {
-				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:DECRYPT_FINAL_FAILED");
-			    }
-
-			    EVP_CIPHER_CTX_free(ctx);
-
-			    // Convert back to hex
-			    std::string decrypted_hex = BytesToHex(decrypted);
-
-			    return StringVector::AddString(result, decrypted_hex);
-
-		    } catch (...) {
-			    return StringVector::AddString(result, "ERROR:DECRYPTION_FAILED");
-		    }
-	    });
-}
-
-// High-level encode function: encode(namespace_hex, id_hex, key_hex) -> uuid_string
-inline void EncodeFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-	// This is just a wrapper around AesEncryptFunction for the revid interface
-	AesEncryptFunction(args, state, result);
-}
-
-// High-level decode function: decode(uuid_string, key_hex) -> struct{namespace, id}
-inline void DecodeFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &uuid_vector = args.data[0];
-	auto &key_vector = args.data[1];
-
-	BinaryExecutor::Execute<string_t, string_t, string_t>(
-	    uuid_vector, key_vector, result, args.size(), [&](string_t uuid_str, string_t key_hex) {
-		    try {
-			    std::string uuid = uuid_str.GetString();
-			    std::string key_str = key_hex.GetString();
-
-			    // Remove dashes from UUID to get hex
-			    std::string encrypted_hex;
-			    for (char c : uuid) {
-				    if (c != '-') {
-					    encrypted_hex += c;
-				    }
-			    }
-
-			    auto encrypted_bytes = HexToBytes(encrypted_hex);
-			    auto key_bytes = HexToBytes(key_str);
-
-			    if (key_bytes.size() != 32) {
-				    return StringVector::AddString(result, "ERROR:INVALID_KEY_SIZE");
-			    }
-
-			    // Set up AES decryption
-			    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
-			    if (!ctx) {
-				    return StringVector::AddString(result, "ERROR:CTX_CREATION_FAILED");
-			    }
-
-			    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_ecb(), nullptr, key_bytes.data(), nullptr) != 1) {
-				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:DECRYPT_INIT_FAILED");
-			    }
-
-			    EVP_CIPHER_CTX_set_padding(ctx, 0);
-
-			    std::vector<uint8_t> decrypted(encrypted_bytes.size());
-			    int len;
-
-			    if (EVP_DecryptUpdate(ctx, decrypted.data(), &len, encrypted_bytes.data(), encrypted_bytes.size()) !=
-			        1) {
-				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:DECRYPT_UPDATE_FAILED");
-			    }
-
-			    int final_len;
-			    if (EVP_DecryptFinal_ex(ctx, decrypted.data() + len, &final_len) != 1) {
-				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:DECRYPT_FINAL_FAILED");
-			    }
-
-			    EVP_CIPHER_CTX_free(ctx);
-
-			    // Convert back to hex and format as "namespace:id"
-			    std::string decrypted_hex = BytesToHex(decrypted);
-
-			    // For now, return the raw hex - in a real implementation we'd need to
-			    // know where the namespace ends and ID begins
-			    // This could be improved by storing the namespace length in the first byte
-			    return StringVector::AddString(result, decrypted_hex);
-
-		    } catch (...) {
-			    return StringVector::AddString(result, "ERROR:DECRYPTION_FAILED");
-		    }
-	    });
-}
-
-// Enhanced encode function that produces standards-compliant UUIDs (namespace_hex + id_hex)
-inline void EncodeValidFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &namespace_vector = args.data[0];
-	auto &id_vector = args.data[1];
-	auto &key_vector = args.data[2];
-
-	TernaryExecutor::Execute<string_t, string_t, string_t, string_t>(
-	    namespace_vector, id_vector, key_vector, result, args.size(),
-	    [&](string_t namespace_hex, string_t id_hex, string_t key_hex) {
-		    try {
-			    // First encrypt normally using existing logic
-			    std::string ns_str = namespace_hex.GetString();
-			    std::string id_str = id_hex.GetString();
-			    std::string key_str = key_hex.GetString();
-
-			    auto ns_bytes = HexToBytes(ns_str);
-			    auto id_bytes = HexToBytes(id_str);
-			    std::vector<uint8_t> combined_bytes;
-			    combined_bytes.insert(combined_bytes.end(), ns_bytes.begin(), ns_bytes.end());
-			    combined_bytes.insert(combined_bytes.end(), id_bytes.begin(), id_bytes.end());
-
-			    if (combined_bytes.size() > 32) {
-				    return StringVector::AddString(result, "ERROR:OVERSIZE");
-			    }
-
-			    auto key_bytes = HexToBytes(key_str);
-			    if (key_bytes.size() != 32) {
-				    return StringVector::AddString(result, "ERROR:INVALID_KEY_SIZE");
-			    }
-
-			    // Pad data to 16 or 32 bytes
-			    size_t target_size = combined_bytes.size() <= 16 ? 16 : 32;
-			    combined_bytes.resize(target_size, 0);
-
-			    // Encrypt with AES-256-ECB
-			    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
-			    if (!ctx) {
-				    return StringVector::AddString(result, "ERROR:CONTEXT_FAILED");
-			    }
-
-			    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_ecb(), nullptr, key_bytes.data(), nullptr) != 1) {
-				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:ENCRYPT_INIT_FAILED");
-			    }
-
-			    EVP_CIPHER_CTX_set_padding(ctx, 0);
-
-			    std::vector<uint8_t> encrypted(target_size);
-			    int len;
-
-			    if (EVP_EncryptUpdate(ctx, encrypted.data(), &len, combined_bytes.data(), target_size) != 1) {
-				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:ENCRYPT_UPDATE_FAILED");
-			    }
-
-			    int final_len;
-			    if (EVP_EncryptFinal_ex(ctx, encrypted.data() + len, &final_len) != 1) {
-				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:ENCRYPT_FINAL_FAILED");
-			    }
-
-			    EVP_CIPHER_CTX_free(ctx);
-
-			    // Convert to hex
-			    std::string encrypted_hex = BytesToHex(encrypted);
-
-			    // Now make it a valid UUID by forcing version and variant bits
-			    // Extract original version (position 12) and variant (position 16) bits
-			    char orig_version = encrypted_hex[12];
-			    char orig_variant = encrypted_hex[16];
-
-			    // Create valid UUID v4: force version=4, variant=8,9,A,B (binary 10xx)
-			    // Store original bits in safe positions (positions 7 and 17)
-			    std::string valid_hex = encrypted_hex;
-			    valid_hex[7] = orig_version;  // Store original version at position 7
-			    valid_hex[12] = '4';          // Force version 4 (UUID v4)
-			    valid_hex[16] = '8';          // Force variant to 8 (binary 1000, valid variant)
-			    valid_hex[17] = orig_variant; // Store original variant at position 17
-
-			    // Format as UUID
-			    std::string valid_uuid = FormatAsUUID(valid_hex);
-
-			    return StringVector::AddString(result, valid_uuid);
-
-		    } catch (...) {
-			    return StringVector::AddString(result, "ERROR:ENCRYPTION_FAILED");
-		    }
-	    });
-}
-
-// Enhanced decode function that handles standards-compliant UUIDs (namespace_hex + id_hex)
-inline void DecodeValidFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &uuid_vector = args.data[0];
-	auto &key_vector = args.data[1];
-
-	BinaryExecutor::Execute<string_t, string_t, string_t>(
-	    uuid_vector, key_vector, result, args.size(), [&](string_t uuid_str, string_t key_hex) {
-		    try {
-			    std::string uuid = uuid_str.GetString();
+			    // Convert inputs
+			    std::string uuid_string = uuid_str.GetString();
 			    std::string key_str = key_hex.GetString();
 
 			    // Remove dashes from UUID
 			    std::string hex_no_dashes;
-			    for (char c : uuid) {
+			    for (char c : uuid_string) {
 				    if (c != '-') {
 					    hex_no_dashes += c;
 				    }
 			    }
 
-			    // Restore original version and variant bits from hidden positions
-			    std::string original_hex = hex_no_dashes;
-			    char orig_version = hex_no_dashes[7];  // Retrieve original version from position 7
-			    char orig_variant = hex_no_dashes[17]; // Retrieve original variant from position 17
-
-			    original_hex[12] = orig_version; // Restore original version
-			    original_hex[16] = orig_variant; // Restore original variant
-
-			    auto encrypted_bytes = HexToBytes(original_hex);
+			    // Validate key (must be 32 bytes for AES-256)
 			    auto key_bytes = HexToBytes(key_str);
-
 			    if (key_bytes.size() != 32) {
 				    return StringVector::AddString(result, "ERROR:INVALID_KEY_SIZE");
 			    }
 
-			    // Decrypt with AES-256-ECB
+			    // Convert hex to bytes
+			    auto encrypted_bytes = HexToBytes(hex_no_dashes);
+
+			    // Set up AES decryption
 			    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
 			    if (!ctx) {
-				    return StringVector::AddString(result, "ERROR:CONTEXT_FAILED");
+				    return StringVector::AddString(result, "ERROR:CTX_CREATION_FAILED");
 			    }
 
 			    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_ecb(), nullptr, key_bytes.data(), nullptr) != 1) {
 				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:DECRYPT_INIT_FAILED");
+				    return StringVector::AddString(result, "ERROR:DECRYPTION_INIT_FAILED");
 			    }
 
-			    EVP_CIPHER_CTX_set_padding(ctx, 0);
-
+			    // Decrypt
 			    std::vector<uint8_t> decrypted(encrypted_bytes.size());
-			    int len;
-
-			    if (EVP_DecryptUpdate(ctx, decrypted.data(), &len, encrypted_bytes.data(), encrypted_bytes.size()) !=
-			        1) {
+			    int out_len;
+			    if (EVP_DecryptUpdate(ctx, decrypted.data(), &out_len, encrypted_bytes.data(), encrypted_bytes.size()) != 1) {
 				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:DECRYPT_UPDATE_FAILED");
+				    return StringVector::AddString(result, "ERROR:DECRYPTION_FAILED");
 			    }
 
+			    // Finalize
 			    int final_len;
-			    if (EVP_DecryptFinal_ex(ctx, decrypted.data() + len, &final_len) != 1) {
+			    if (EVP_DecryptFinal_ex(ctx, decrypted.data() + out_len, &final_len) != 1) {
 				    EVP_CIPHER_CTX_free(ctx);
-				    return StringVector::AddString(result, "ERROR:DECRYPT_FINAL_FAILED");
+				    return StringVector::AddString(result, "ERROR:DECRYPTION_FINALIZE_FAILED");
 			    }
 
 			    EVP_CIPHER_CTX_free(ctx);
 
-			    // Convert back to hex
+			    // Convert to hex
 			    std::string decrypted_hex = BytesToHex(decrypted);
 
 			    return StringVector::AddString(result, decrypted_hex);
-
 		    } catch (...) {
-			    return StringVector::AddString(result, "ERROR:DECRYPTION_FAILED");
+			    return StringVector::AddString(result, "ERROR:DECRYPTION_EXCEPTION");
 		    }
 	    });
 }
 
-// Enhanced encode function (single payload) that produces standards-compliant UUID v4
-// Signature: aes_crypto_encode_valid_uuid(payload_hex, key_hex) -> uuid_v4_string
+// Simplified valid UUID encode function (single payload)
 inline void EncodeValidUuidFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &payload_vector = args.data[0];
-    auto &key_vector = args.data[1];
+	auto &payload_vector = args.data[0];
+	auto &key_vector = args.data[1];
 
-    BinaryExecutor::Execute<string_t, string_t, string_t>(
+	BinaryExecutor::Execute<string_t, string_t, string_t>(
         payload_vector, key_vector, result, args.size(), [&](string_t payload_hex, string_t key_hex) {
             try {
+                // Convert inputs
                 std::string payload_str = payload_hex.GetString();
                 std::string key_str = key_hex.GetString();
 
+                // Convert payload to bytes
                 auto payload_bytes = HexToBytes(payload_str);
+
+                // Check size limits (32 bytes max)
                 if (payload_bytes.size() > 32) {
                     return StringVector::AddString(result, "ERROR:OVERSIZE");
                 }
 
+                // Validate key (must be 32 bytes for AES-256)
                 auto key_bytes = HexToBytes(key_str);
                 if (key_bytes.size() != 32) {
                     return StringVector::AddString(result, "ERROR:INVALID_KEY_SIZE");
@@ -466,31 +226,30 @@ inline void EncodeValidUuidFunction(DataChunk &args, ExpressionState &state, Vec
                 size_t target_size = payload_bytes.size() <= 16 ? 16 : 32;
                 payload_bytes.resize(target_size, 0);
 
-                // Encrypt with AES-256-ECB
+                // Set up AES encryption
                 EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
                 if (!ctx) {
-                    return StringVector::AddString(result, "ERROR:CONTEXT_FAILED");
+                    return StringVector::AddString(result, "ERROR:CTX_CREATION_FAILED");
                 }
 
                 if (EVP_EncryptInit_ex(ctx, EVP_aes_256_ecb(), nullptr, key_bytes.data(), nullptr) != 1) {
                     EVP_CIPHER_CTX_free(ctx);
-                    return StringVector::AddString(result, "ERROR:ENCRYPT_INIT_FAILED");
+                    return StringVector::AddString(result, "ERROR:ENCRYPTION_INIT_FAILED");
                 }
 
-                EVP_CIPHER_CTX_set_padding(ctx, 0);
-
+                // Encrypt
                 std::vector<uint8_t> encrypted(target_size);
-                int len;
-
-                if (EVP_EncryptUpdate(ctx, encrypted.data(), &len, payload_bytes.data(), target_size) != 1) {
+                int out_len;
+                if (EVP_EncryptUpdate(ctx, encrypted.data(), &out_len, payload_bytes.data(), payload_bytes.size()) != 1) {
                     EVP_CIPHER_CTX_free(ctx);
-                    return StringVector::AddString(result, "ERROR:ENCRYPT_UPDATE_FAILED");
+                    return StringVector::AddString(result, "ERROR:ENCRYPTION_FAILED");
                 }
 
+                // Finalize
                 int final_len;
-                if (EVP_EncryptFinal_ex(ctx, encrypted.data() + len, &final_len) != 1) {
+                if (EVP_EncryptFinal_ex(ctx, encrypted.data() + out_len, &final_len) != 1) {
                     EVP_CIPHER_CTX_free(ctx);
-                    return StringVector::AddString(result, "ERROR:ENCRYPT_FINAL_FAILED");
+                    return StringVector::AddString(result, "ERROR:ENCRYPTION_FINALIZE_FAILED");
                 }
 
                 EVP_CIPHER_CTX_free(ctx);
@@ -498,89 +257,100 @@ inline void EncodeValidUuidFunction(DataChunk &args, ExpressionState &state, Vec
                 // Convert to hex
                 std::string encrypted_hex = BytesToHex(encrypted);
 
-                // Force version/variant bits, preserve originals at positions 7 and 17
-                char orig_version = encrypted_hex[12];
-                char orig_variant = encrypted_hex[16];
+                // Now make it a valid UUID by forcing version and variant bits
+                // Extract original version (position 12-13) and variant (position 16-17) bits
+                std::string orig_version = encrypted_hex.substr(12, 2);
+                std::string orig_variant = encrypted_hex.substr(16, 2);
 
+                // Create valid UUID v4: force version=4, variant=8,9,A,B (binary 10xx)
+                // Store original bits in safe positions (positions 7-8 and 17-18)
                 std::string valid_hex = encrypted_hex;
-                valid_hex[7] = orig_version;   // store original version
-                valid_hex[12] = '4';           // UUID v4
-                valid_hex[16] = '8';           // valid variant (1000)
-                valid_hex[17] = orig_variant;  // store original variant
+                valid_hex.replace(7, 2, orig_version);   // Store original version at position 7-8
+                valid_hex.replace(12, 2, "4e");          // Force version 4 (UUID v4)
+                valid_hex.replace(16, 2, "82");          // Force variant to 82 (binary 1000, valid variant)
+                valid_hex.replace(17, 2, orig_variant);  // Store original variant at position 17-18
 
-                // Format as UUID string
-    std::string valid_uuid = FormatAsUUID(valid_hex);
-    return StringVector::AddString(result, valid_uuid);
+                // Format as UUID
+                std::string valid_uuid = FormatAsUUID(valid_hex);
 
+                return StringVector::AddString(result, valid_uuid);
             } catch (...) {
-                return StringVector::AddString(result, "ERROR:ENCRYPTION_FAILED");
+                return StringVector::AddString(result, "ERROR:ENCRYPTION_EXCEPTION");
             }
         });
 }
 
-// Enhanced decode function (single payload) that handles standards-compliant UUID v4
-// Signature: aes_crypto_decode_valid_uuid(uuid_v4_string, key_hex) -> payload_hex
+// Simplified valid UUID decode function (single payload)
 inline void DecodeValidUuidFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &uuid_vector = args.data[0];
-    auto &key_vector = args.data[1];
+	auto &uuid_vector = args.data[0];
+	auto &key_vector = args.data[1];
 
-    BinaryExecutor::Execute<string_t, string_t, string_t>(
+	BinaryExecutor::Execute<string_t, string_t, string_t>(
         uuid_vector, key_vector, result, args.size(), [&](string_t uuid_str, string_t key_hex) {
             try {
-                std::string uuid = uuid_str.GetString();
+                // Convert inputs
+                std::string uuid_string = uuid_str.GetString();
                 std::string key_str = key_hex.GetString();
 
-                // Remove dashes
+                // Remove dashes from UUID
                 std::string hex_no_dashes;
-                for (char c : uuid) {
+                for (char c : uuid_string) {
                     if (c != '-') {
                         hex_no_dashes += c;
                     }
                 }
 
-                // Restore original version and variant from positions 7 and 17
-                std::string original_hex = hex_no_dashes;
-                char orig_version = hex_no_dashes[7];
-                char orig_variant = hex_no_dashes[17];
-                original_hex[12] = orig_version;
-                original_hex[16] = orig_variant;
-
-                auto encrypted_bytes = HexToBytes(original_hex);
+                // Validate key (must be 32 bytes for AES-256)
                 auto key_bytes = HexToBytes(key_str);
                 if (key_bytes.size() != 32) {
                     return StringVector::AddString(result, "ERROR:INVALID_KEY_SIZE");
                 }
 
-                // Decrypt
+                // Restore original version and variant bits from hidden positions
+                std::string original_hex = hex_no_dashes;
+                // Get the hex digit pairs at the stored positions
+                std::string orig_version = hex_no_dashes.substr(7, 2);  // Retrieve original version from position 7-8
+                std::string orig_variant = hex_no_dashes.substr(17, 2); // Retrieve original variant from position 17-18
+
+                original_hex.replace(12, 2, orig_version); // Restore original version at position 12-13
+                original_hex.replace(16, 2, orig_variant); // Restore original variant at position 16-17
+
+                auto encrypted_bytes = HexToBytes(original_hex);
+
+                // Set up AES decryption
                 EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
                 if (!ctx) {
-                    return StringVector::AddString(result, "ERROR:CONTEXT_FAILED");
+                    return StringVector::AddString(result, "ERROR:CTX_CREATION_FAILED");
                 }
+
                 if (EVP_DecryptInit_ex(ctx, EVP_aes_256_ecb(), nullptr, key_bytes.data(), nullptr) != 1) {
                     EVP_CIPHER_CTX_free(ctx);
-                    return StringVector::AddString(result, "ERROR:DECRYPT_INIT_FAILED");
+                    return StringVector::AddString(result, "ERROR:DECRYPTION_INIT_FAILED");
                 }
-                EVP_CIPHER_CTX_set_padding(ctx, 0);
 
+                // Decrypt
                 std::vector<uint8_t> decrypted(encrypted_bytes.size());
-                int len;
-                if (EVP_DecryptUpdate(ctx, decrypted.data(), &len, encrypted_bytes.data(), encrypted_bytes.size()) != 1) {
+                int out_len;
+                if (EVP_DecryptUpdate(ctx, decrypted.data(), &out_len, encrypted_bytes.data(), encrypted_bytes.size()) != 1) {
                     EVP_CIPHER_CTX_free(ctx);
-                    return StringVector::AddString(result, "ERROR:DECRYPT_UPDATE_FAILED");
+                    return StringVector::AddString(result, "ERROR:DECRYPTION_FAILED");
                 }
+
+                // Finalize
                 int final_len;
-                if (EVP_DecryptFinal_ex(ctx, decrypted.data() + len, &final_len) != 1) {
+                if (EVP_DecryptFinal_ex(ctx, decrypted.data() + out_len, &final_len) != 1) {
                     EVP_CIPHER_CTX_free(ctx);
-                    return StringVector::AddString(result, "ERROR:DECRYPT_FINAL_FAILED");
+                    return StringVector::AddString(result, "ERROR:DECRYPTION_FINALIZE_FAILED");
                 }
+
                 EVP_CIPHER_CTX_free(ctx);
 
-                // Return payload as hex
+                // Convert to hex
                 std::string decrypted_hex = BytesToHex(decrypted);
-                return StringVector::AddString(result, decrypted_hex);
 
+                return StringVector::AddString(result, decrypted_hex);
             } catch (...) {
-                return StringVector::AddString(result, "ERROR:DECRYPTION_FAILED");
+                return StringVector::AddString(result, "ERROR:DECRYPTION_EXCEPTION");
             }
         });
 }
@@ -605,30 +375,6 @@ static void LoadInternal(DatabaseInstance &instance) {
 	auto aes_decrypt_function = ScalarFunction("aes_crypto_decrypt", {LogicalType::VARCHAR, LogicalType::VARCHAR},
 	                                           LogicalType::VARCHAR, AesDecryptFunction);
 	ExtensionUtil::RegisterFunction(instance, aes_decrypt_function);
-
-	// Register high-level encode function: aes_crypto_encode(namespace_hex, id_hex, key_hex) -> uuid_string
-	auto encode_function =
-	    ScalarFunction("aes_crypto_encode", {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
-	                   LogicalType::VARCHAR, EncodeFunction);
-	ExtensionUtil::RegisterFunction(instance, encode_function);
-
-	// Register high-level decode function: aes_crypto_decode(uuid_string, key_hex) -> combined_hex
-	auto decode_function = ScalarFunction("aes_crypto_decode", {LogicalType::VARCHAR, LogicalType::VARCHAR},
-	                                      LogicalType::VARCHAR, DecodeFunction);
-	ExtensionUtil::RegisterFunction(instance, decode_function);
-
-	// Register enhanced encode function that produces valid UUIDs: aes_crypto_encode_valid(namespace_hex, id_hex,
-	// key_hex) -> valid_uuid
-	auto encode_valid_function =
-	    ScalarFunction("aes_crypto_encode_valid", {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
-	                   LogicalType::VARCHAR, EncodeValidFunction);
-	ExtensionUtil::RegisterFunction(instance, encode_valid_function);
-
-	// Register enhanced decode function that handles valid UUIDs: aes_crypto_decode_valid(valid_uuid, key_hex) ->
-	// combined_hex
-	auto decode_valid_function = ScalarFunction("aes_crypto_decode_valid", {LogicalType::VARCHAR, LogicalType::VARCHAR},
-	                                            LogicalType::VARCHAR, DecodeValidFunction);
-	ExtensionUtil::RegisterFunction(instance, decode_valid_function);
 
 	// Register OpenSSL version check function for debugging
 	auto aes_crypto_openssl_version_scalar_function = ScalarFunction(
