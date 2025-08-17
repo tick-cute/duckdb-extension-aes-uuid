@@ -101,10 +101,13 @@ inline void AesEncryptFunction(DataChunk &args, ExpressionState &state, Vector &
 				    return StringVector::AddString(result, "ERROR:ENCRYPTION_INIT_FAILED");
 			    }
 
+			    // Disable padding since we handle it manually
+			    EVP_CIPHER_CTX_set_padding(ctx, 0);
+
 			    // Encrypt
 			    std::vector<uint8_t> encrypted(target_size);
 			    int out_len;
-			    if (EVP_EncryptUpdate(ctx, encrypted.data(), &out_len, combined_bytes.data(), combined_bytes.size()) != 1) {
+			    if (EVP_EncryptUpdate(ctx, encrypted.data(), &out_len, combined_bytes.data(), target_size) != 1) {
 				    EVP_CIPHER_CTX_free(ctx);
 				    return StringVector::AddString(result, "ERROR:ENCRYPTION_FAILED");
 			    }
@@ -168,6 +171,9 @@ inline void AesDecryptFunction(DataChunk &args, ExpressionState &state, Vector &
 				    EVP_CIPHER_CTX_free(ctx);
 				    return StringVector::AddString(result, "ERROR:DECRYPTION_INIT_FAILED");
 			    }
+
+			    // Disable padding since we handle it manually
+			    EVP_CIPHER_CTX_set_padding(ctx, 0);
 
 			    // Decrypt
 			    std::vector<uint8_t> decrypted(encrypted_bytes.size());
@@ -237,10 +243,13 @@ inline void EncodeValidUuidFunction(DataChunk &args, ExpressionState &state, Vec
                     return StringVector::AddString(result, "ERROR:ENCRYPTION_INIT_FAILED");
                 }
 
+                // Disable padding since we handle it manually
+                EVP_CIPHER_CTX_set_padding(ctx, 0);
+
                 // Encrypt
                 std::vector<uint8_t> encrypted(target_size);
                 int out_len;
-                if (EVP_EncryptUpdate(ctx, encrypted.data(), &out_len, payload_bytes.data(), payload_bytes.size()) != 1) {
+                if (EVP_EncryptUpdate(ctx, encrypted.data(), &out_len, payload_bytes.data(), target_size) != 1) {
                     EVP_CIPHER_CTX_free(ctx);
                     return StringVector::AddString(result, "ERROR:ENCRYPTION_FAILED");
                 }
@@ -327,6 +336,9 @@ inline void DecodeValidUuidFunction(DataChunk &args, ExpressionState &state, Vec
                     EVP_CIPHER_CTX_free(ctx);
                     return StringVector::AddString(result, "ERROR:DECRYPTION_INIT_FAILED");
                 }
+
+                // Disable padding since we handle it manually
+                EVP_CIPHER_CTX_set_padding(ctx, 0);
 
                 // Decrypt
                 std::vector<uint8_t> decrypted(encrypted_bytes.size());
